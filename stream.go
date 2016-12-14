@@ -93,12 +93,8 @@ func (s MapStream) GetEntriesByTime(e EntryType, t time.Time) (es []Entry) {
 	}()
 	es = make([]Entry, 0)
 	for _, v := range s.entries {
-		if t.Before(v.Timestamp) {
-			if compareType(v.Type, e) {
-				es = append(es, v)
-			}
-		} else {
-			break
+		if t.Before(v.Timestamp) && compareType(v.Type, e) {
+			es = append(es, v)
 		}
 	}
 	return es

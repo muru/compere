@@ -72,7 +72,7 @@ func (s *Server) GetRecent(w http.ResponseWriter, r *http.Request) {
 	log.Println(params)
 	author := params.Get("author")
 	t := getType(params)
-	ret := s.s.GetEntriesByTime(t, time.Now().Add(-10*time.Minute))
+	ret := s.s.GetEntriesByTime(t, time.Now().Add(-10*time.Second))
 	for k, _ := range ret {
 		ret[k].Voted = ret[k].HasVoted(author)
 	}
@@ -110,6 +110,7 @@ func (s *Server) GetSimilar(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if x := recover(); x != nil {
 			w.WriteHeader(http.StatusInternalServerError)
+			log.Println(x)
 		}
 	}()
 	params := r.URL.Query()
@@ -120,12 +121,15 @@ func (s *Server) GetSimilar(w http.ResponseWriter, r *http.Request) {
 	form := url.Values{}
 	form.Add("text", text)
 
-	req, _ := http.NewRequest("GET", similarAddr+"/similar", strings.NewReader(form.Encode()))
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := hc.Do(req)
-	log.Println(similarAddr, text, resp, err)
+	resp, err := hc.Get(similarAddr + "/similar?" + form.Encode())
+	log.Println(similarAddr + "/similar?" + form.Encode())
+	log.Println(text, resp.Status, err)
 	b := []byte{}
-	resp.Body.Read(b)
+	n, err := resp.Body.Read(b)
+	log.Println(n, err)
+	ids := []int{}
+	json.Unmarshal(b, &ids)
+	log.Println(ids)
 	w.WriteHeader(resp.StatusCode)
 	w.Write(b)
 }
