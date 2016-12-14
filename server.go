@@ -7,9 +7,12 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/renstrom/fuzzysearch/fuzzy"
 )
 
 var (
@@ -115,44 +118,62 @@ func (s *Server) GetSimilar(w http.ResponseWriter, r *http.Request) {
 	}()
 	params := r.URL.Query()
 	log.Println(params)
+	t := getType(params, None)
 	text := params.Get("text")
-	hc := http.Client{}
+	ret := s.s.GetEntriesByTime(t, time.Unix(0, 0))
+	strings := []string{}
+	keys := map[string]int{}
+	for k, v := range ret {
+		strings = append(strings, v.Text)
+		keys[v.Text] = k
+	}
 
-	form := url.Values{}
-	form.Add("text", text)
+	matches := fuzzy.RankFindFold(text, strings)
+	sort.Sort(matches)
+	sortedRet := make([]Entry, len(matches))
+	for k, v := range matches {
+		log.Println(v.Target, v.Distance)
+		sortedRet[k] = ret[keys[v.Target]]
+	}
 
-	resp, err := hc.Get(similarAddr + "/similar?" + form.Encode())
-	log.Println(similarAddr + "/similar?" + form.Encode())
-	log.Println(text, resp.Status, err)
-	b := []byte{}
-	n, err := resp.Body.Read(b)
-	log.Println(n, err)
-	ids := []int{}
-	json.Unmarshal(b, &ids)
-	log.Println(ids)
-	w.WriteHeader(resp.StatusCode)
-	w.Write(b)
+	out, ok := json.Marshal(sortedRet)
+	if ok == nil {
+		w.Write(out)
+	} else {
+		log.Panicln("Could not JSON: ", ok)
+	}
 }
 
 func (s *Server) GetSentiment(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if x := recover(); x != nil {
 			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(fmt.Sprint(0.5)))
 			log.Println(x)
 		}
 	}()
 	hc := http.Client{}
 	resp, err := hc.Get(sentiAddr + "/sentiment")
-	log.Println(resp.Status, err)
-	b := []byte{}
+	if err != nil {
+		panic(err)
+	}
+
+	defer resp.Body.Close()
+	b := make([]byte, 256)
 	n, err := resp.Body.Read(b)
-	log.Println(n, err)
-	if n == 0 {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(fmt.Sprint(0)))
+	if err != nil {
+		panic(err)
+	}
+	senti := []float64{}
+	err = json.Unmarshal(b[:n], &senti)
+	if err != nil {
+		panic(err)
+	}
+	log.Println(n, err, senti, b[:n])
+	if len(senti) == 0 {
+		panic(fmt.Errorf("0 bytes read"))
 	} else {
-		w.WriteHeader(resp.StatusCode)
-		w.Write(b)
+		w.Write([]byte(fmt.Sprint(senti[0])))
 	}
 }
 
@@ -161,7 +182,7 @@ func entryToForm(e Entry) url.Values {
 	form.Add("id", strconv.Itoa(e.ID))
 	form.Add("author", e.Author)
 	form.Add("text", e.Text)
-	form.Add("type", string(e.Type))
+	form.Add("type", e.Type.String())
 	form.Add("score", strconv.Itoa(e.Score))
 	form.Add("timestamp", strconv.FormatInt(e.Timestamp.Unix(), 10))
 	if e.Voted {
@@ -169,6 +190,7 @@ func entryToForm(e Entry) url.Values {
 	} else {
 		form.Add("voted", "false")
 	}
+	log.Println(form.Encode())
 
 	return form
 }
