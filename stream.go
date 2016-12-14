@@ -58,7 +58,7 @@ func (s *MapStream) handleChanges(m Message) {
 	switch m.Type {
 	case Add:
 		id := len(s.entries)
-		e := NewEntry(id, m.E.Author, m.E.Text, m.E.EntryType)
+		e := NewEntry(id, m.E.Author, m.E.Text, m.E.Type)
 		s.entries = append(s.entries, e)
 		m.E = e
 	case Vote:
@@ -93,8 +93,8 @@ func (s MapStream) GetEntriesByTime(e EntryType, t time.Time) (es []Entry) {
 	}()
 	es = make([]Entry, 0)
 	for _, v := range s.entries {
-		if t.Before(v.Time) {
-			if compareType(v.EntryType, e) {
+		if t.Before(v.Timestamp) {
+			if compareType(v.Type, e) {
 				es = append(es, v)
 			}
 		} else {
@@ -113,7 +113,7 @@ func (s *MapStream) GetEntriesByScore(e EntryType, num int) (es []Entry) {
 	out := &Entries{}
 	out.By = GreaterByScore
 	for _, v := range s.entries {
-		if compareType(e, v.EntryType) {
+		if compareType(e, v.Type) {
 			out.E = append(out.E, v)
 		}
 	}

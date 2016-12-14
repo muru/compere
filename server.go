@@ -2,12 +2,19 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
+)
+
+var (
+	similarAddr string
+	sentiAddr   string
 )
 
 type Server struct {
@@ -26,8 +33,10 @@ func getType(u url.Values) EntryType {
 		return Question
 	case "c":
 		return Comment
+	case "":
+		return Question
 	}
-	return None
+	return Question
 }
 
 func (s *Server) GetAll(w http.ResponseWriter, r *http.Request) {
@@ -105,9 +114,48 @@ func (s *Server) GetSimilar(w http.ResponseWriter, r *http.Request) {
 	}()
 	params := r.URL.Query()
 	log.Println(params)
-	//t := getType(params)
-	//text := params.Get("text")
-	w.WriteHeader(http.StatusTeapot)
+	text := params.Get("text")
+	hc := http.Client{}
+
+	form := url.Values{}
+	form.Add("text", text)
+
+	req, _ := http.NewRequest("GET", similarAddr+"/similar", strings.NewReader(form.Encode()))
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := hc.Do(req)
+	log.Println(similarAddr, text, resp, err)
+	b := []byte{}
+	resp.Body.Read(b)
+	w.WriteHeader(resp.StatusCode)
+	w.Write(b)
+}
+
+func entryToForm(e Entry) url.Values {
+	form := url.Values{}
+	form.Add("id", strconv.Itoa(e.ID))
+	form.Add("author", e.Author)
+	form.Add("text", e.Text)
+	form.Add("type", string(e.Type))
+	form.Add("score", strconv.Itoa(e.Score))
+	form.Add("timestamp", strconv.FormatInt(e.Timestamp.Unix(), 10))
+	if e.Voted {
+		form.Add("voted", "true")
+	} else {
+		form.Add("voted", "false")
+	}
+
+	return form
+}
+
+func sentToOthers(e Entry, addr string) {
+	hc := http.Client{}
+
+	form := entryToForm(e)
+
+	req, _ := http.NewRequest("POST", addr+"/add", strings.NewReader(form.Encode()))
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := hc.Do(req)
+	log.Println(addr, e, resp, err)
 }
 
 func (s *Server) Add(w http.ResponseWriter, r *http.Request) {
@@ -125,13 +173,15 @@ func (s *Server) Add(w http.ResponseWriter, r *http.Request) {
 		t = Comment
 	}
 	ch := make(chan Message)
-	m := Message{ReplyChan: ch, Type: Add, E: Entry{Author: author, Text: text, EntryType: t}}
+	m := Message{ReplyChan: ch, Type: Add, E: Entry{Author: author, Text: text, Type: t}}
 	s.s.InputChannel() <- m
 	m = <-ch
 
 	log.Println(m)
 	if m.Type != Error {
 		w.Write([]byte(fmt.Sprintf("%d", m.E.ID)))
+		go sentToOthers(m.E, similarAddr)
+		sentToOthers(m.E, sentiAddr)
 	} else {
 		log.Panicln(m)
 	}
@@ -154,7 +204,7 @@ func (s *Server) Vote(w http.ResponseWriter, r *http.Request) {
 	}
 	vote, err := strconv.Atoi(params.Get("vote"))
 	if err != nil {
-		log.Panicln("Could not parse: ", params.Get("vote"))
+		vote = 1
 	}
 
 	ch := make(chan Message)
@@ -169,28 +219,17 @@ func (s *Server) Vote(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
-	// stub
-	switch r.Method {
-	case http.MethodGet:
-		params := r.URL.Query()
-		log.Println("GET", params)
-
-	case http.MethodPost:
-		r.ParseForm()
-		params := r.Form
-		if comment, ok := params["comment"]; ok {
-			log.Println("POST", comment)
-		} else if question, ok := params["question"]; ok {
-			log.Println("POST", question)
-		} else if question_id, ok := params["question_id"]; ok {
-			log.Println("POST", question_id)
-		}
-	}
-	w.WriteHeader(http.StatusTeapot)
-}
-
 func main() {
+	var (
+		host = flag.String("host", "", "host address to listen on")
+		port = flag.String("port", "8080", "port to listen on")
+	)
+	flag.StringVar(&sentiAddr, "senti-addr", "", "address of sentimental analysis server")
+	flag.StringVar(&similarAddr, "similar-addr", "", "address of similarity analysis server")
+	flag.Parse()
+	sentiAddr = "http://" + sentiAddr
+	similarAddr = "http://" + similarAddr
+
 	s := MakeServer()
 	http.HandleFunc("/all", s.GetAll)
 	http.HandleFunc("/recent", s.GetRecent)
@@ -199,5 +238,5 @@ func main() {
 	http.HandleFunc("/add", s.Add)
 	http.HandleFunc("/vote", s.Vote)
 	http.HandleFunc("/sentiment", s.Vote)
-	http.ListenAndServe("localhost:8080", nil)
+	http.ListenAndServe(*host+":"+*port, nil)
 }

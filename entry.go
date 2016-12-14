@@ -13,11 +13,11 @@ const (
 func (e EntryType) String() string {
 	switch e {
 	case Comment:
-		return "Comment"
+		return "c"
 	case Question:
-		return "Question"
+		return "q"
 	}
-	return "None"
+	return ""
 }
 
 func (e EntryType) MarshalText() ([]byte, error) {
@@ -46,10 +46,10 @@ type Entry struct {
 	ID        int       `json:"id"`
 	Author    string    `json:"author"`
 	Text      string    `json:"text"`
-	EntryType EntryType `json:"type"` // Question or Comment
+	Type      EntryType `json:"type"` // Question or Comment
 	Score     int       `json:"score"`
 	Voted     bool      `json:"voted"` // Only used for output
-	Time      time.Time `json:"timestamp"`
+	Timestamp time.Time `json:"timestamp"`
 
 	votes map[string]int
 }
@@ -73,7 +73,7 @@ func LessByScore(e1, e2 Entry) bool {
 	if e1.Score < e2.Score {
 		return true
 	} else if e1.Score == e2.Score {
-		return e1.Time.Before(e2.Time)
+		return e1.Timestamp.Before(e2.Timestamp)
 	}
 	return false
 }
@@ -82,7 +82,7 @@ func GreaterByScore(e1, e2 Entry) bool {
 	if e1.Score > e2.Score {
 		return true
 	} else if e1.Score == e2.Score {
-		return e1.Time.Before(e2.Time)
+		return e1.Timestamp.Before(e2.Timestamp)
 	}
 	return false
 }
@@ -92,10 +92,10 @@ func NewEntry(id int, author, text string, etype EntryType) Entry {
 	e.ID = id
 	e.Author = author
 	e.Text = text
-	e.EntryType = etype
+	e.Type = etype
 
 	e.Score = 0
-	e.Time = time.Now()
+	e.Timestamp = time.Now()
 	e.votes = make(map[string]int)
 	return e
 }
