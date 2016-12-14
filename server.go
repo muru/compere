@@ -27,16 +27,16 @@ func MakeServer() *Server {
 	return &s
 }
 
-func getType(u url.Values) EntryType {
+func getType(u url.Values, def EntryType) EntryType {
 	switch u.Get("type") {
 	case "q":
 		return Question
 	case "c":
 		return Comment
 	case "":
-		return Question
+		return def
 	}
-	return Question
+	return None
 }
 
 func (s *Server) GetAll(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +49,7 @@ func (s *Server) GetAll(w http.ResponseWriter, r *http.Request) {
 	params := r.URL.Query()
 	log.Println(params)
 	author := params.Get("author")
-	t := getType(params)
+	t := getType(params, None)
 	ret := s.s.GetEntriesByTime(t, time.Unix(0, 0))
 	for k, _ := range ret {
 		ret[k].Voted = ret[k].HasVoted(author)
@@ -71,8 +71,8 @@ func (s *Server) GetRecent(w http.ResponseWriter, r *http.Request) {
 	params := r.URL.Query()
 	log.Println(params)
 	author := params.Get("author")
-	t := getType(params)
-	ret := s.s.GetEntriesByTime(t, time.Now().Add(-10*time.Second))
+	t := getType(params, Question)
+	ret := s.s.GetEntriesByTime(t, time.Now().Add(-1*time.Hour))
 	for k, _ := range ret {
 		ret[k].Voted = ret[k].HasVoted(author)
 	}
@@ -93,7 +93,7 @@ func (s *Server) GetTop(w http.ResponseWriter, r *http.Request) {
 	params := r.URL.Query()
 	log.Println(params)
 	author := params.Get("author")
-	t := getType(params)
+	t := getType(params, Question)
 	ret := s.s.GetEntriesByScore(t, 100)
 	for k, _ := range ret {
 		ret[k].Voted = ret[k].HasVoted(author)
@@ -134,6 +134,28 @@ func (s *Server) GetSimilar(w http.ResponseWriter, r *http.Request) {
 	w.Write(b)
 }
 
+func (s *Server) GetSentiment(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		if x := recover(); x != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.Println(x)
+		}
+	}()
+	hc := http.Client{}
+	resp, err := hc.Get(sentiAddr + "/sentiment")
+	log.Println(resp.Status, err)
+	b := []byte{}
+	n, err := resp.Body.Read(b)
+	log.Println(n, err)
+	if n == 0 {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(fmt.Sprint(0)))
+	} else {
+		w.WriteHeader(resp.StatusCode)
+		w.Write(b)
+	}
+}
+
 func entryToForm(e Entry) url.Values {
 	form := url.Values{}
 	form.Add("id", strconv.Itoa(e.ID))
@@ -171,7 +193,7 @@ func (s *Server) Add(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	params := r.Form
 	author := params.Get("author")
-	t := getType(params)
+	t := getType(params, Question)
 	text := params.Get("text")
 	if t == None {
 		t = Comment
@@ -239,8 +261,8 @@ func main() {
 	http.HandleFunc("/recent", s.GetRecent)
 	http.HandleFunc("/top", s.GetTop)
 	http.HandleFunc("/similar", s.GetSimilar)
+	http.HandleFunc("/sentiment", s.GetSentiment)
 	http.HandleFunc("/add", s.Add)
 	http.HandleFunc("/vote", s.Vote)
-	http.HandleFunc("/sentiment", s.Vote)
 	http.ListenAndServe(*host+":"+*port, nil)
 }
